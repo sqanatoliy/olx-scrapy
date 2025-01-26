@@ -1,131 +1,79 @@
-# Scrapy settings for olx_scraper project
-#
-# For simplicity, this file contains only settings considered important or
-# commonly used. You can find more settings consulting the documentation:
-#
-#     https://docs.scrapy.org/en/latest/topics/settings.html
-#     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
-#     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+from decouple import config
 
-BOT_NAME = "olx_scraper"
+# === Basic Scrapy setting ===
+BOT_NAME = "olx_scraper"  # Project name Scrapy
+SPIDER_MODULES = ["olx_scraper.spiders"]  # way to the modules with spiders
+NEWSPIDER_MODULE = "olx_scraper.spiders"  # way to create new spiders
 
-SPIDER_MODULES = ["olx_scraper.spiders"]
-NEWSPIDER_MODULE = "olx_scraper.spiders"
+LOG_LEVEL = "DEBUG"  # Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+CONCURRENT_REQUESTS = 1  # Number of concurrent requests
+DOWNLOAD_DELAY = 1  # Delay between requests (in seconds)
 
-LOG_LEVEL = 'INFO'
-
-CONCURRENT_REQUESTS = 4
-DOWNLOAD_DELAY = 1
-PLAYWRIGHT_BROWSER_TYPE = "chromium"
+PLAYWRIGHT_BROWSER_TYPE = "chromium"  # Type of browser used Playwright
 PLAYWRIGHT_LAUNCH_OPTIONS = {
-    "headless": True,
+    "headless": True,  # Run in headless mode
 }
 
-USER_AGENT = None
-
+USER_AGENT = None  # Scrapy User Agent
 DEFAULT_REQUEST_HEADERS = {
-    'User-Agent': USER_AGENT,
-    'Accept-Language': 'en-US,en;q=0.9,uk-UA;q=0.8,uk;q=0.7',
-    'Referer': 'https://www.olx.ua/',
-    "Connection": "keep-alive",
+    "User-Agent": USER_AGENT,  
+    "Accept-Language": "en-US,en;q=0.9,uk-UA;q=0.8,uk;q=0.7",  
+    "Referer": "https://www.olx.ua/",  
+    "Connection": "keep-alive",  
 }
-
 
 DOWNLOAD_HANDLERS = {
-    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",  # Using Playwright for HTTP requests
+    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",  # Using Playwright for HTTPS requests
 }
 
+PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 30_000
 
-PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 30000
+ITEM_PIPELINES = {
+    "olx_scraper.pipelines.PostgresPipeline": 300,  # Using PostgresPipeline to process data
+}
 
+# === Database settings ===
+POSTGRES_URI = config("POSTGRES_URI", default="localhost")
+POSTGRES_DB = config("POSTGRES_DB", default="olx_db")
+POSTGRES_USER = config("POSTGRES_USER", default="user")
+POSTGRES_PASSWORD = config("POSTGRES_PASSWORD", default="password")
 
-# # Для використання проксі з Scrapy Playwright
-# DOWNLOADER_MIDDLEWARES = {
-#     'scrapy_playwright.middleware.PlaywrightMiddleware': 800,
-#     'scrapy.downloadermiddlewares.httpproxy.HttpProxyMiddleware': 1,
-# }
+ROBOTSTXT_OBEY = False  # Ignoring robots.txt rules
 
+# === Logging directory settings ===
+LOG_DIR = "logs"  # Directory for saving logs
+LOG_FILE = os.path.join(LOG_DIR, "scraper.log")  # Full path to the log file
+MAX_LOG_FILE_SIZE = 1 * 1024 * 1024 * 1024  # Maximum size of the log file (1 GB)
+BACKUP_COUNT = 5  # Number of backup copies of logs
 
-# USER_AGENT = (
-#     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-#     "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-# )
+# Create a directory for logs
+os.makedirs(LOG_DIR, exist_ok=True)
 
-# Crawl responsibly by identifying yourself (and your website) on the user-agent
-#USER_AGENT = "olx_scraper (+http://www.yourdomain.com)"
+# Logging settings
+logger = logging.getLogger("scrapy")  # Initializing the Scrapy logger
+logger.setLevel(LOG_LEVEL)  # Setting the logging level 
 
-# Obey robots.txt rules
-ROBOTSTXT_OBEY = False
+# Rotation of logs
+rotating_handler = RotatingFileHandler(
+    LOG_FILE, maxBytes=MAX_LOG_FILE_SIZE, backupCount=BACKUP_COUNT
+)  # Creating a handler to rotate log files
+formatter = logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s [%(funcName)s]: %(message)s"
+)
+rotating_handler.setFormatter(formatter)
+# rotating_handler.setLevel(logging.DEBUG)  # Setting the logging level (if different from general)
+logger.addHandler(rotating_handler)  # Adding a handler to the logger
 
-# Configure maximum concurrent requests performed by Scrapy (default: 16)
-#CONCURRENT_REQUESTS = 32
+# Console handler (optional for debugging)
+stream_handler = logging.StreamHandler()  # Creating a handler for the console
+stream_handler.setFormatter(formatter)
+rotating_handler.setLevel(logging.INFO)  # Setting the logging level (if different from general)
+logger.addHandler(stream_handler)
 
-# Configure a delay for requests for the same website (default: 0)
-# See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
-# See also autothrottle settings and docs
-#DOWNLOAD_DELAY = 3
-# The download delay setting will honor only one of:
-#CONCURRENT_REQUESTS_PER_DOMAIN = 16
-#CONCURRENT_REQUESTS_PER_IP = 16
-
-# Disable cookies (enabled by default)
-#COOKIES_ENABLED = False
-
-# Disable Telnet Console (enabled by default)
-#TELNETCONSOLE_ENABLED = False
-
-# Override the default request headers:
-#DEFAULT_REQUEST_HEADERS = {
-#    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-#    "Accept-Language": "en",
-#}
-
-# Enable or disable spider middlewares
-# See https://docs.scrapy.org/en/latest/topics/spider-middleware.html
-#SPIDER_MIDDLEWARES = {
-#    "olx_scraper.middlewares.OlxScraperSpiderMiddleware": 543,
-#}
-
-# Enable or disable downloader middlewares
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
-#DOWNLOADER_MIDDLEWARES = {
-#    "olx_scraper.middlewares.OlxScraperDownloaderMiddleware": 543,
-#}
-
-# Enable or disable extensions
-# See https://docs.scrapy.org/en/latest/topics/extensions.html
-#EXTENSIONS = {
-#    "scrapy.extensions.telnet.TelnetConsole": None,
-#}
-
-# Configure item pipelines
-# See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-#ITEM_PIPELINES = {
-#    "olx_scraper.pipelines.OlxScraperPipeline": 300,
-#}
-
-# Enable and configure the AutoThrottle extension (disabled by default)
-# See https://docs.scrapy.org/en/latest/topics/autothrottle.html
-#AUTOTHROTTLE_ENABLED = True
-# The initial download delay
-#AUTOTHROTTLE_START_DELAY = 5
-# The maximum download delay to be set in case of high latencies
-#AUTOTHROTTLE_MAX_DELAY = 60
-# The average number of requests Scrapy should be sending in parallel to
-# each remote server
-#AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
-# Enable showing throttling stats for every response received:
-#AUTOTHROTTLE_DEBUG = False
-
-# Enable and configure HTTP caching (disabled by default)
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html#httpcache-middleware-settings
-#HTTPCACHE_ENABLED = True
-#HTTPCACHE_EXPIRATION_SECS = 0
-#HTTPCACHE_DIR = "httpcache"
-#HTTPCACHE_IGNORE_HTTP_CODES = []
-#HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
-
-# Set settings whose default value is deprecated to a future-proof value
-TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
-FEED_EXPORT_ENCODING = "utf-8"
+# === =================== ===
+TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"  # Compatible with new versions of Twisted
+FEED_EXPORT_ENCODING = "utf-8"  # UTF-8 encoding for data export
