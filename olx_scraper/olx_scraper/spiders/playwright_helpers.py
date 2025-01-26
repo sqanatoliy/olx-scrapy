@@ -97,6 +97,32 @@ async def scroll_to_number_of_views(
         await scrapy_logger(f"=== Failed to get elements User Name, Description: {err} ===", 40)
 
 
+async def wait_for_number_of_views(
+    page: Page,
+    ad_view_counter_selector: str,
+    scrapy_logger: LoggerCallable,
+) -> None:
+    """
+    Очікує на відображення кількості переглядів.
+
+    Функція виконує наступне:
+    - Очікує появи елемента, що відповідає кількість переглядів.
+
+    :param page: Екземпляр Playwright Page.
+    :param ad_view_counter_selector: Селектор для кількості переглядів.
+    :param scrapy_logger: Функція для логування повідомлень із зазначенням рівня логування.
+    """
+    try:
+        await page.wait_for_selector(ad_view_counter_selector, timeout=2_000)
+    except PlaywrightTimeoutError as err:
+        await scrapy_logger(
+            f"=== The expectation for the number of views was not successful: {err} ===", 30)
+        return
+    await scrapy_logger(
+        f"=== Number of views received ===", 20)
+    return
+
+
 async def scroll_and_click_to_show_phone(
     page: Page,
     btn_show_phone_selector: str,

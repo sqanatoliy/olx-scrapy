@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Iterator, AsyncGenerator, Any
 import typing
 
@@ -14,9 +14,8 @@ from ..items import OlxScraperItem
 from .playwright_helpers import (
     check_403_error,
     scroll_to_number_of_views,
-    scroll_and_click_to_show_phone,
+    scroll_and_click_to_show_phone, wait_for_number_of_views,
 )
-
 
 # ADS LIST PAGE
 ADS_BLOCK_SELECTOR = 'div[data-testid="l-card"]'
@@ -34,7 +33,7 @@ BTN_SHOW_PHONE_SELECTOR = 'button[data-testid="show-phone"]'
 CONTACT_PHONE_SELECTOR = 'a[data-testid="contact-phone"]'
 # User profile
 USER_NAME_SELECTOR = 'a[data-testid="user-profile-link"] h4'
-USER_SCORE_SELECTOR = 'article[data-testid="score-widget"] > div > p'
+USER_SCORE_SELECTOR = 'div[data-testid="score-widget"] > p'
 USER_REGISTRATION_SELECTOR = 'a[data-testid="user-profile-link"] > div > div > p > span'
 USER_LAST_SEEN_SELECTOR = 'p[data-testid="lastSeenBox"] > span'
 # Location
@@ -47,7 +46,7 @@ DESCRIPTION_PARTS_SELECTOR = 'div[data-cy="ad_description"] > div'
 # Description section footer
 FOOTER_BAR_SELECTOR = 'div[data-testid="ad-footer-bar-section"]'
 AD_ID_SELECTOR = 'normalize-space(//div[@data-testid="ad-footer-bar-section"]/span)'
-AD_VIEW_COUNTER_SELECTOR = '//span[@data-testid="page-view-counter"]/text()'
+AD_VIEW_COUNTER_SELECTOR = 'span[data-testid="page-view-counter"]'
 
 
 class OlxSpider(scrapy.Spider):
@@ -70,6 +69,8 @@ class OlxSpider(scrapy.Spider):
                     "playwright_context_kwargs": {
                         "ignore_https_errors": True,
                         "viewport": {"width": 1980, "height": 1020},
+                        "locale": "uk-UA",
+                        "timezone_id": "Europe/Kiev",
                         # "proxy": {
                         #     "server": "http://proxy.toolip.io:31114",
                         #     "username": "tl-d8582f18f76fecabd2f916e4bd0df4cf63c9f54cd0c1b3d14529591b9ffac8c7-country-us-session-c9166",
@@ -100,11 +101,13 @@ class OlxSpider(scrapy.Spider):
             ad_price: str | None = ad.css(AD_PRICE_SELECTOR).css("::text").get()
             if ad_link and ad_title:
                 full_url: str = response.urljoin(ad_link)
+                if "/d/uk/" not in full_url:
+                    full_url = full_url.replace("/d/", "/d/uk/")
                 self.log(f"Collected URL: {full_url}", level=logging.INFO)
                 self.log(f"Collected TITLE: {ad_title}", level=logging.INFO)
                 self.log(f"Collected PRICE: {ad_price}", level=logging.INFO)
                 # Create Item and fill fields
-                item:OlxScraperItem = OlxScraperItem()
+                item: OlxScraperItem = OlxScraperItem()
                 item["title"] = ad_title.strip()
                 item["price"] = ad_price.strip() if ad_price else None
                 item["url"] = full_url.strip()
@@ -119,6 +122,8 @@ class OlxSpider(scrapy.Spider):
                         "playwright_context_kwargs": {
                             "ignore_https_errors": True,
                             "viewport": {"width": 1980, "height": 1020},
+                            "locale": "uk-UA",
+                            "timezone_id": "Europe/Kiev",
                             # "proxy": {
                             #     "server": "http://proxy.toolip.io:31114",
                             #     "username": "tl-d8582f18f76fecabd2f916e4bd0df4cf63c9f54cd0c1b3d14529591b9ffac8c7-country-us-session-c9166",
@@ -135,7 +140,10 @@ class OlxSpider(scrapy.Spider):
                                 self.scrapy_logger,
                             ),
                             PageMethod(
-                                "wait_for_load_state", "domcontentloaded", timeout=10000
+                                "wait_for_load_state", "domcontentloaded", timeout=10_000
+                            ),
+                            PageMethod(
+                                wait_for_number_of_views, AD_VIEW_COUNTER_SELECTOR, self.scrapy_logger,
                             ),
                             # PageMethod(page_pause),
                         ],
@@ -172,7 +180,7 @@ class OlxSpider(scrapy.Spider):
             block_with_photos = response.css(BLOCK_WITH_PHOTO_SELECTOR)
             # Get all src values from img tags
             img_urls_list: list[str] = []
-            for div in block_with_photos:
+            for div in block_with_photos[:]:
                 img_srcs: list[str] = div.css("img::attr(src)").getall()
                 img_urls_list.extend(img_srcs)
 
@@ -187,17 +195,17 @@ class OlxSpider(scrapy.Spider):
             description: str = " ".join(part.strip() for part in description_parts if part)
             # Announcement ID
             ad_id: str | None = response.xpath(AD_ID_SELECTOR).get()
-            ad_view_counter: str | None = response.xpath(AD_VIEW_COUNTER_SELECTOR).get()
+            ad_view_counter: str | None = response.css(AD_VIEW_COUNTER_SELECTOR).css("::text").get()
 
-            item["ad_pub_date"] = ad_pub_date
+            item["ad_pub_date"] = self.parse_date(ad_pub_date)
             item["user_name"] = user_name.strip() if user_name else None
             item["user_score"] = user_score if user_score else None
             item["user_registration"] = (
                 user_registration.strip() if user_registration else None
             )
-            item["user_last_seen"] = user_last_seen
-            item["announcement_id"] = ad_id
-            item["announcement_view_counter"] = (
+            item["user_last_seen"] = self.parse_date(user_last_seen) if user_last_seen else self.parse_date("Сьогодні")
+            item["ad_id"] = ad_id
+            item["ad_view_counter"] = (
                 ad_view_counter if ad_view_counter else None
             )
             item["location"] = location.strip() if location else None
@@ -238,8 +246,7 @@ class OlxSpider(scrapy.Spider):
         """Scrapy logger for Playwright"""
         self.logger.log(level, message)
 
-    @staticmethod
-    def parse_date(input_str) -> str:
+    def parse_date(self, input_str) -> str:
         """Parse a string with a date and returns it in the '15 січня 2025 р.' format."""
         today: datetime = datetime.now()
         months_uk: dict[int, str] = {
@@ -258,16 +265,35 @@ class OlxSpider(scrapy.Spider):
         }
         if input_str.startswith("Сьогодні"):
             full_date: str = today.strftime(f"%d {months_uk[today.month]} %Y р.")
+        elif input_str.startswith("Онлайн вчора"):
+            yesterday = today - timedelta(days=1)
+            full_date: str = yesterday.strftime(f"%d {months_uk[yesterday.month]} %Y р.")
+        elif input_str.startswith("Онлайн в "):
+            full_date: str = today.strftime(f"%d {months_uk[today.month]} %Y р.")
+        elif input_str.startswith("Онлайн "):
+            input_str = input_str[len("Онлайн "):]
+            match: re.Match[str] | None = re.match(
+                r"(\d{1,2}) ([а-яіїє]+) (\d{4}) р\.", input_str
+            )
+            if not match:
+                self.log(f"Некоректний формат дати: {input_str}", level=logging.WARNING)
+                return ""
+            day: str = match.group(1).zfill(2)
+            month: str = match.group(2)
+            year: str = match.group(3)
+            if month not in months_uk.values():
+                self.log(f"Некоректний місяць у даті: {month}", level=logging.WARNING)
+            full_date = f"{day} {month} {year} р."
         else:
             match: re.Match[str] | None = re.match(
                 r"(\d{1,2}) ([а-яіїє]+) (\d{4}) р\.", input_str
             )
             if not match:
-                raise ValueError(f"Некоректний формат дати: {input_str}")
+                self.log(f"Некоректний формат дати: {input_str}", level=logging.WARNING)
             day: str | typing.Any = match.group(1).zfill(2)
             month: str | typing.Any = match.group(2)
             year: str = match.group(3)
             if month not in months_uk.values():
-                raise ValueError(f"Некоректний місяць у даті: {month}")
+                self.log(f"Некоректний місяць у даті: {month}", level=logging.WARNING)
             full_date = f"{day} {month} {year} р."
         return full_date
