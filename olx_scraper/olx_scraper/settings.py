@@ -1,7 +1,12 @@
 import logging
+from scrapy.utils.log import configure_logging
 from logging.handlers import RotatingFileHandler
 import os
 from decouple import config
+
+
+# Disable default Scrapy log settings.
+configure_logging(install_root_handler=False)
 
 # === Basic Scrapy setting ===
 BOT_NAME = "olx_scraper"  # Project name Scrapy
@@ -46,16 +51,17 @@ ROBOTSTXT_OBEY = False  # Ignoring robots.txt rules
 
 # === Logging directory settings ===
 LOG_DIR = "logs"  # Directory for saving logs
-LOG_FILE = os.path.join(LOG_DIR, "scraper.log")  # Full path to the log file
+LOG_FILE = os.path.join(LOG_DIR, "olx_scraper.log")  # Full path to the log file
 MAX_LOG_FILE_SIZE = 1 * 1024 * 1024 * 1024  # Maximum size of the log file (1 GB)
 BACKUP_COUNT = 5  # Number of backup copies of logs
+
 
 # Create a directory for logs
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # Logging settings
-logger = logging.getLogger("scrapy")  # Initializing the Scrapy logger
-logger.setLevel(LOG_LEVEL)  # Setting the logging level 
+logger = logging.getLogger()  # Initializing logger
+logger.setLevel(LOG_LEVEL)  # Setting the logging level
 
 # Rotation of logs
 rotating_handler = RotatingFileHandler(
@@ -68,11 +74,13 @@ rotating_handler.setFormatter(formatter)
 # rotating_handler.setLevel(logging.DEBUG)  # Setting the logging level (if different from general)
 logger.addHandler(rotating_handler)  # Adding a handler to the logger
 
-# Console handler (optional for debugging)
-stream_handler = logging.StreamHandler()  # Creating a handler for the console
-stream_handler.setFormatter(formatter)
-rotating_handler.setLevel(logging.INFO)  # Setting the logging level (if different from general)
-logger.addHandler(stream_handler)
+# Stream Handler for console output
+console_handler = logging.StreamHandler()
+console_formatter = logging.Formatter("%(asctime)s [%(levelname)s]: %(message)s")
+console_handler.setFormatter(console_formatter)
+console_handler.setLevel(logging.INFO)  # Show only INFO level and above in terminal
+logger.addHandler(console_handler)
+
 
 # === =================== ===
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"  # Compatible with new versions of Twisted

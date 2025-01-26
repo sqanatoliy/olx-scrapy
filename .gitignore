@@ -179,3 +179,5 @@ pyrightconfig.json
 /.vscode/
 # MacOS
 .DS_Store
+# logs
+/olx_scraper/logs/

@@ -2,7 +2,6 @@ import logging
 import re
 from datetime import datetime, timedelta
 from typing import Iterator, AsyncGenerator, Any
-import typing
 
 import scrapy
 from parsel import Selector
@@ -14,7 +13,8 @@ from ..items import OlxScraperItem
 from .playwright_helpers import (
     check_403_error,
     scroll_to_number_of_views,
-    scroll_and_click_to_show_phone, wait_for_number_of_views,
+    scroll_and_click_to_show_phone,
+    wait_for_number_of_views,
 )
 
 # ADS LIST PAGE
@@ -41,7 +41,9 @@ MAP_OVERLAY_SELECTOR = 'div[data-testid="qa-map-overlay-hidden"]'
 # Photo section
 BLOCK_WITH_PHOTO_SELECTOR = 'div[data-testid="ad-photo"]'
 # Description section
-AD_TAGS_SELECTOR = 'div[data-testid="qa-advert-slot"] + ul'
+AD_TAGS_SELECTOR = (
+    'div[data-testid="ad-promotion-actions"] + div[data-testid="qa-advert-slot"] + div'
+)
 DESCRIPTION_PARTS_SELECTOR = 'div[data-cy="ad_description"] > div'
 # Description section footer
 FOOTER_BAR_SELECTOR = 'div[data-testid="ad-footer-bar-section"]'
@@ -51,6 +53,7 @@ AD_VIEW_COUNTER_SELECTOR = 'span[data-testid="page-view-counter"]'
 
 class OlxSpider(scrapy.Spider):
     """Scraper for olx.ua/list"""
+
     name = "olx"
     allowed_domains: list[str] = ["olx.ua"]
     start_urls: list[str] = [
@@ -59,7 +62,9 @@ class OlxSpider(scrapy.Spider):
 
     def start_requests(self) -> Iterator[scrapy.Request]:
         """Override start_requests to include Playwright meta"""
+        self.logger.info("Starting the spider and generating requests...")
         for url in self.start_urls:
+            self.logger.debug(f"Generating request for URL: {url}")
             yield scrapy.Request(
                 url=url,
                 callback=self.parse,
@@ -78,10 +83,10 @@ class OlxSpider(scrapy.Spider):
                         # },
                     },
                     "playwright_page_methods": [
-                        PageMethod(check_403_error, url, self.scrapy_logger),
+                        PageMethod(check_403_error, url, self),
                         PageMethod(
                             "wait_for_selector", AD_TITLE_URL_SELECTOR, timeout=10_000
-                        ),  # Wait for all network requests
+                        ),
                     ],
                 },
                 errback=self.errback_close_page,
@@ -89,11 +94,13 @@ class OlxSpider(scrapy.Spider):
 
     def parse(self, response: Response) -> Iterator[scrapy.Request]:
         """Get all urls"""
+        self.logger.info(f"Parsing response from {response.url}")
         ads_block: SelectorList = response.css(ADS_BLOCK_SELECTOR)
         if not ads_block:
-            self.log("No ads found on the page!", level=scrapy.logging.WARNING)
+            self.logger.warning(f"No ads found on the page: {response.url}")
             return
         for ad in ads_block[:]:
+            self.logger.debug(f"Ad block found: {ad.get()[:100]}")
             ad_link: str | None = (
                 ad.css(AD_TITLE_URL_SELECTOR).css("::attr(href)").get()
             )
@@ -103,9 +110,7 @@ class OlxSpider(scrapy.Spider):
                 full_url: str = response.urljoin(ad_link)
                 if "/d/uk/" not in full_url:
                     full_url = full_url.replace("/d/", "/d/uk/")
-                self.log(f"Collected URL: {full_url}", level=logging.INFO)
-                self.log(f"Collected TITLE: {ad_title}", level=logging.INFO)
-                self.log(f"Collected PRICE: {ad_price}", level=logging.INFO)
+                self.logger.info(f"Collected URL: {full_url}")
                 # Create Item and fill fields
                 item: OlxScraperItem = OlxScraperItem()
                 item["title"] = ad_title.strip()
@@ -131,38 +136,47 @@ class OlxSpider(scrapy.Spider):
                             # },
                         },
                         "playwright_page_methods": [
-                            PageMethod(check_403_error, full_url, self.scrapy_logger),
+                            PageMethod(check_403_error, full_url, self),
                             PageMethod(
                                 scroll_to_number_of_views,
                                 FOOTER_BAR_SELECTOR,
                                 USER_NAME_SELECTOR,
                                 DESCRIPTION_PARTS_SELECTOR,
-                                self.scrapy_logger,
+                                self,
                             ),
                             PageMethod(
-                                "wait_for_load_state", "domcontentloaded", timeout=10_000
+                                "wait_for_load_state",
+                                "domcontentloaded",
+                                timeout=10_000,
                             ),
                             PageMethod(
-                                wait_for_number_of_views, AD_VIEW_COUNTER_SELECTOR, self.scrapy_logger,
+                                wait_for_number_of_views,
+                                AD_VIEW_COUNTER_SELECTOR,
+                                self,
                             ),
-                            # PageMethod(page_pause),
                         ],
                     },
                     errback=self.errback_close_page,
                 )
 
-    async def parse_ad(self, response: Response) -> AsyncGenerator[OlxScraperItem, None]:
+    async def parse_ad(
+            self, response: Response
+    ) -> AsyncGenerator[OlxScraperItem, None]:
         """Processing the detailed page of the ad"""
         page: Any = response.meta["playwright_page"]
         try:
             item: OlxScraperItem = response.meta["item"]
 
             # Ad publication date
-            ad_pub_date: str | None = response.css(AD_PUB_DATE_SELECTOR).css("::text").get()
+            ad_pub_date: str | None = (
+                response.css(AD_PUB_DATE_SELECTOR).css("::text").get()
+            )
 
             # User profile
             user_name: str | None = response.css(USER_NAME_SELECTOR).css("::text").get()
-            user_score: str | None = response.css(USER_SCORE_SELECTOR).css("::text").get()
+            user_score: str | None = (
+                response.css(USER_SCORE_SELECTOR).css("::text").get()
+            )
             user_registration: str | None = (
                 response.css(USER_REGISTRATION_SELECTOR).css("::text").get()
             )
@@ -173,7 +187,9 @@ class OlxSpider(scrapy.Spider):
             # Location
             map_overlay = response.css(MAP_OVERLAY_SELECTOR)
             location_section = map_overlay.xpath("..")
-            location_parts: list[str] = location_section.css("svg + div *::text").getall()
+            location_parts: list[str] = location_section.css(
+                "svg + div *::text"
+            ).getall()
             location: str = " ".join(locat.strip() for locat in location_parts if locat)
 
             # block with urls on the photos
@@ -192,10 +208,14 @@ class OlxSpider(scrapy.Spider):
             description_parts: list[str] = (
                 response.css(DESCRIPTION_PARTS_SELECTOR).css("::text").getall()
             )
-            description: str = " ".join(part.strip() for part in description_parts if part)
+            description: str = " ".join(
+                part.strip() for part in description_parts if part
+            )
             # Announcement ID
             ad_id: str | None = response.xpath(AD_ID_SELECTOR).get()
-            ad_view_counter: str | None = response.css(AD_VIEW_COUNTER_SELECTOR).css("::text").get()
+            ad_view_counter: str | None = (
+                response.css(AD_VIEW_COUNTER_SELECTOR).css("::text").get()
+            )
 
             item["ad_pub_date"] = self.parse_date(ad_pub_date)
             item["user_name"] = user_name.strip() if user_name else None
@@ -203,11 +223,13 @@ class OlxSpider(scrapy.Spider):
             item["user_registration"] = (
                 user_registration.strip() if user_registration else None
             )
-            item["user_last_seen"] = self.parse_date(user_last_seen) if user_last_seen else self.parse_date("Сьогодні")
-            item["ad_id"] = ad_id
-            item["ad_view_counter"] = (
-                ad_view_counter if ad_view_counter else None
+            item["user_last_seen"] = (
+                self.parse_date(user_last_seen)
+                if user_last_seen
+                else self.parse_date("Сьогодні")
             )
+            item["ad_id"] = ad_id
+            item["ad_view_counter"] = ad_view_counter if ad_view_counter else None
             item["location"] = location.strip() if location else None
             item["ad_tags"] = ad_tags
             item["description"] = description if description else None
@@ -217,7 +239,7 @@ class OlxSpider(scrapy.Spider):
                 page,
                 BTN_SHOW_PHONE_SELECTOR,
                 CONTACT_PHONE_SELECTOR,
-                self.scrapy_logger,
+                self,
             )
             page_content: Any = await page.content()
             new_html = Selector(text=page_content)
@@ -226,14 +248,15 @@ class OlxSpider(scrapy.Spider):
                 new_html.css(CONTACT_PHONE_SELECTOR).css("::text").get()
             )
             item["phone_number"] = phone_number if phone_number else None
-            self.log(f"Phone is {phone_number}", level=logging.INFO)
+            self.logger.info("Phone is %s", phone_number)
             # Save data
             yield item
             await page.close()
-            # await page.context.close()
+            self.logger.info("Page closed")
         except Exception as e:
             self.logger.error(f"Error in parse_ad: {e}")
             await page.close()
+            self.logger.info("Page closed after exception %s", e)
             raise
 
     async def errback_close_page(self, failure) -> None:
@@ -241,10 +264,7 @@ class OlxSpider(scrapy.Spider):
         if "playwright_page" in meta:
             page: Any = meta["playwright_page"]
             await page.close()
-
-    async def scrapy_logger(self, message: str, level: int = 20) -> None:
-        """Scrapy logger for Playwright"""
-        self.logger.log(level, message)
+            self.logger.info("Page closed after exception")
 
     def parse_date(self, input_str) -> str:
         """Parse a string with a date and returns it in the '15 січня 2025 р.' format."""
@@ -267,33 +287,35 @@ class OlxSpider(scrapy.Spider):
             full_date: str = today.strftime(f"%d {months_uk[today.month]} %Y р.")
         elif input_str.startswith("Онлайн вчора"):
             yesterday = today - timedelta(days=1)
-            full_date: str = yesterday.strftime(f"%d {months_uk[yesterday.month]} %Y р.")
+            full_date: str = yesterday.strftime(
+                f"%d {months_uk[yesterday.month]} %Y р."
+            )
         elif input_str.startswith("Онлайн в "):
             full_date: str = today.strftime(f"%d {months_uk[today.month]} %Y р.")
         elif input_str.startswith("Онлайн "):
             input_str = input_str[len("Онлайн "):]
             match: re.Match[str] | None = re.match(
-                r"(\d{1,2}) ([а-яіїє]+) (\d{4}) р\.", input_str
+                r"(\d{1,2}) ([а-яіїє]+) (\d{4}) р.", input_str
             )
             if not match:
-                self.log(f"Некоректний формат дати: {input_str}", level=logging.WARNING)
+                self.logger.warning("Некоректний формат дати: %s", input_str)
                 return ""
             day: str = match.group(1).zfill(2)
             month: str = match.group(2)
             year: str = match.group(3)
             if month not in months_uk.values():
-                self.log(f"Некоректний місяць у даті: {month}", level=logging.WARNING)
+                self.logger.warning("Некоректний місяць у даті: %s", month)
             full_date = f"{day} {month} {year} р."
         else:
             match: re.Match[str] | None = re.match(
-                r"(\d{1,2}) ([а-яіїє]+) (\d{4}) р\.", input_str
+                r"(\d{1,2}) ([а-яіїє]+) (\d{4}) р.", input_str
             )
             if not match:
-                self.log(f"Некоректний формат дати: {input_str}", level=logging.WARNING)
-            day: str | typing.Any = match.group(1).zfill(2)
-            month: str | typing.Any = match.group(2)
+                self.logger.warning("Некоректний формат дати: %s", input_str)
+            day: str | Any = match.group(1).zfill(2)
+            month: str | Any = match.group(2)
             year: str = match.group(3)
             if month not in months_uk.values():
-                self.log(f"Некоректний місяць у даті: {month}", level=logging.WARNING)
+                self.logger.warning("Некоректний місяць у даті: %s", month)
             full_date = f"{day} {month} {year} р."
         return full_date
